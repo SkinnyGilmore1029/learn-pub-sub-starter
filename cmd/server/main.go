@@ -6,52 +6,52 @@ import (
 	"os"
 	"os/signal"
 
-	"learn-pub-sub-starter/internal/pubsub"
-	"learn-pub-sub-starter/internal/routing"
-
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
-	// Step 1: Declare connection string
-	connStr := "amqp://guest:guest@localhost:5672/"
-
-	// Step 2: Connect to RabbitMQ
-	conn, err := amqp.Dial(connStr)
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer conn.Close()
 
-	// Step 3: Create a channel
-	pauseChannel, err := conn.Channel()
+	ch, err := conn.Channel()
 	if err != nil {
 		log.Fatalf("Failed to open a channel: %v", err)
 	}
-	defer pauseChannel.Close()
+	defer ch.Close()
 
-	fmt.Println("✅ Successfully connected to RabbitMQ!")
+	fmt.Println("✅ Connected to RabbitMQ!")
 
-	// 🟢 Step 4: Publish pause message to the exchange
-	state := routing.PlayingState{IsPaused: true}
-
-	err = pubsub.PublishJSON(
-		pauseChannel,
-		routing.ExchangePerilDirect,
-		routing.PauseKey,
-		state,
+	// Declare the exchange to make sure it exists
+	err = ch.ExchangeDeclare(
+		routing.ExchangePerilDirect, // name
+		"direct",                    // type
+		true,                        // durable
+		false,                       // autoDelete
+		false,                       // internal
+		false,                       // noWait
+		nil,                         // args
 	)
+	if err != nil {
+		log.Fatalf("Failed to declare exchange: %v", err)
+	}
+
+	// Publish a pause message
+	state := routing.PlayingState{IsPaused: true}
+	err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, state)
 	if err != nil {
 		log.Fatalf("Failed to publish message: %v", err)
 	}
 
-	fmt.Println("📨 Published pause message to exchange:", routing.ExchangePerilDirect)
+	fmt.Println("📨 Published pause message!")
 
-	// Step 5: Wait for Ctrl+C (SIGINT)
+	// Wait for Ctrl+C
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
-
-	<-signalChan // Block until Ctrl+C pressed
-
+	<-signalChan
 	fmt.Println("🛑 Shutting down server...")
 }
