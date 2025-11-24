@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -11,35 +13,36 @@ import (
 )
 
 func main() {
-	// Connect to RabbitMQ
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	fmt.Println("Starting Peril client...")
+	const rabbitConnString = "amqp://guest:guest@localhost:5672/"
+
+	conn, err := amqp.Dial(rabbitConnString)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		log.Fatalf("could not connect to RabbitMQ: %v", err)
 	}
 	defer conn.Close()
+	fmt.Println("Peril game client connected to RabbitMQ!")
 
-	// Prompt user for a username
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
-		log.Fatalf("Bad username: %v", err)
+		log.Fatalf("could not get username: %v", err)
 	}
 
-	// Build queue name like "pause.username"
-	queueName := routing.PauseKey + "." + username
-
-	// Declare and bind queue
-	ch, q, err := pubsub.DeclareAndBind(
+	_, queue, err := pubsub.DeclareAndBind(
 		conn,
-		routing.ExchangePerilDirect, // exchange
-		queueName,                   // queue name
-		routing.PauseKey,            // routing key
-		pubsub.SimpleQueueTransient, // queue type
+		routing.ExchangePerilDirect,
+		routing.PauseKey+"."+username,
+		routing.PauseKey,
+		pubsub.SimpleQueueTransient,
 	)
 	if err != nil {
-		log.Fatalf("Failed to declare and bind queue: %v", err)
+		log.Fatalf("could not subscribe to pause: %v", err)
 	}
-	defer ch.Close()
+	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
 
-	fmt.Printf("Client connected. Queue: %s (Exchange: %s)\n", q.Name, routing.ExchangePerilDirect)
-	fmt.Println("Starting Peril client...")
+	// wait for ctrl+c
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	<-signalChan
+	fmt.Println("RabbitMQ connection closed.")
 }
