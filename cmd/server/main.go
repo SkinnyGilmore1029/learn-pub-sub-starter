@@ -3,9 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -25,6 +24,7 @@ func main() {
 	defer ch.Close()
 
 	fmt.Println("✅ Connected to RabbitMQ!")
+	gamelogic.PrintServerHelp()
 
 	// Declare the exchange to make sure it exists
 	err = ch.ExchangeDeclare(
@@ -40,7 +40,7 @@ func main() {
 		log.Fatalf("Failed to declare exchange: %v", err)
 	}
 
-	// Publish a pause message
+	/* Publish a pause message
 	state := routing.PlayingState{IsPaused: true}
 	err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, state)
 	if err != nil {
@@ -48,10 +48,45 @@ func main() {
 	}
 
 	fmt.Println("📨 Published pause message!")
+	Leaving this for references and notes
+	*/
+	for {
+		input := gamelogic.GetInput()
+		if len(input) == 0 {
+			continue
+		}
+		switch input[0] {
+		case "pause":
+			fmt.Println("📨 Sending pause message!")
+			state := routing.PlayingState{IsPaused: true}
+			err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, state)
+			if err != nil {
+				log.Fatalf("Failed to publish message: %v", err)
+			}
 
-	// Wait for Ctrl+C
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
-	fmt.Println("🛑 Shutting down server...")
+		case "resume":
+			fmt.Println("📨 Sending resume message!")
+
+			state := routing.PlayingState{IsPaused: false}
+			err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, state)
+			if err != nil {
+				log.Fatalf("Failed to publish message: %v", err)
+			}
+
+		case "quit":
+			fmt.Println("🛑 Shutting down server...")
+			return
+
+		default:
+			fmt.Println("Unknown Command")
+		}
+
+		/* Wait for Ctrl+C
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, os.Interrupt)
+		<-signalChan
+		fmt.Println("🛑 Shutting down server...")
+		Leaving this for references and notes
+		*/
+	}
 }
