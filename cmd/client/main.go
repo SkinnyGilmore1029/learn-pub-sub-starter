@@ -26,19 +26,20 @@ func main() {
 		log.Fatalf("could not get username: %v", err)
 	}
 
-	_, queue, err := pubsub.DeclareAndBind(
+	newstate := gamelogic.NewGameState(username)
+
+	// Subscribe to pause/resume messages
+	err = pubsub.SubscribeJSON(
 		conn,
-		routing.ExchangePerilDirect,
-		routing.PauseKey+"."+username,
-		routing.PauseKey,
-		pubsub.SimpleQueueTransient,
+		routing.ExchangePerilDirect,   // exchange
+		routing.PauseKey+"."+username, // queue name (unique for each client)
+		routing.PauseKey,              // routing key (pause)
+		pubsub.SimpleQueueTransient,   // queue type
+		handlerPause(newstate),        // handler function
 	)
 	if err != nil {
-		log.Fatalf("could not subscribe to pause: %v", err)
+		log.Fatalf("could not subscribe to pause messages: %v", err)
 	}
-	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
-
-	newstate := gamelogic.NewGameState(username)
 
 	for {
 		input := gamelogic.GetInput()
@@ -62,19 +63,18 @@ func main() {
 		case "spam":
 			fmt.Println("Spamming not allowed yet!")
 		case "quit":
-			fmt.Println("🛑 Shutting down server...")
+			fmt.Println("🛑 Shutting down client...")
 			return
-
 		default:
 			fmt.Println("Unknown Command")
 			continue
 		}
 	}
+}
 
-	/* wait for ctrl+c
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
-	fmt.Println("RabbitMQ connection closed.")
-	*/
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(state routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(state)
+	}
 }

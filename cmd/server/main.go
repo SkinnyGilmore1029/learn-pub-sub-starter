@@ -40,6 +40,18 @@ func main() {
 		log.Fatalf("Failed to declare exchange: %v", err)
 	}
 
+	_, queue, err := pubsub.DeclareAndBind(
+		conn,
+		routing.ExchangePerilTopic,
+		"game_logs",
+		routing.GameLogSlug+".*",
+		pubsub.SimpleQueueDurable,
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to game logs: %v", err)
+	}
+	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
+
 	/* Publish a pause message
 	state := routing.PlayingState{IsPaused: true}
 	err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, state)
