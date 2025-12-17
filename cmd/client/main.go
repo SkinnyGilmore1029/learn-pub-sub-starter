@@ -21,6 +21,11 @@ func main() {
 	defer conn.Close()
 	fmt.Println("Peril game client connected to RabbitMQ!")
 
+	publishCh, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("could not create channel: %v", err)
+	}
+
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
 		log.Fatalf("could not get username: %v", err)
@@ -31,14 +36,27 @@ func main() {
 	// Subscribe to pause/resume messages
 	err = pubsub.SubscribeJSON(
 		conn,
-		routing.ExchangePerilDirect,   // exchange
-		routing.PauseKey+"."+username, // queue name (unique for each client)
-		routing.PauseKey,              // routing key (pause)
-		pubsub.SimpleQueueTransient,   // queue type
-		handlerPause(newstate),        // handler function
+		routing.ExchangePerilDirect, // exchange
+		routing.PauseKey+"."+newstate.GetUsername(), // queue name (unique for each client)
+		routing.PauseKey,            // routing key (pause)
+		pubsub.SimpleQueueTransient, // queue type
+		handlerPause(newstate),      // handler function
 	)
 	if err != nil {
 		log.Fatalf("could not subscribe to pause messages: %v", err)
+	}
+
+	// Subscribe to move messages
+	err = pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.ArmyMovesPrefix+"."+newstate.GetUsername(),
+		routing.ArmyMovesPrefix+"."+"*",
+		pubsub.SimpleQueueTransient,
+		handlerMove(newstate),
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to army moves: %v", err)
 	}
 
 	for {
@@ -52,10 +70,22 @@ func main() {
 				fmt.Println("Error:", err)
 			}
 		case "move":
-			_, err := newstate.CommandMove(input)
+			mv, err := newstate.CommandMove(input)
 			if err != nil {
 				fmt.Println("Error:", err)
+				continue
 			}
+			err = pubsub.PublishJSON(
+				publishCh,
+				routing.ExchangePerilTopic,
+				routing.ArmyMovesPrefix+"."+mv.Player.Username,
+				mv,
+			)
+			if err != nil {
+				fmt.Printf("error: %s\n", err)
+				continue
+			}
+			fmt.Printf("Moved %v units to %s\n", len(mv.Units), mv.ToLocation)
 		case "status":
 			newstate.CommandStatus()
 		case "help":
@@ -76,5 +106,12 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 	return func(state routing.PlayingState) {
 		defer fmt.Print("> ")
 		gs.HandlePause(state)
+	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(move gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(move)
 	}
 }
