@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -13,24 +12,24 @@ type Pause struct {
 	Paused bool `json:"paused"`
 }
 
+//
+// Publishing
+//
+
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
-	body, err := json.Marshal(val)
+	dat, err := json.Marshal(val)
 	if err != nil {
 		return err
 	}
-
-	return ch.PublishWithContext(
-		context.Background(), // ctx
-		exchange,             // exchange name
-		key,                  // routing key
-		false,                // mandatory
-		false,                // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        body,
-		},
-	)
+	return ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp.Publishing{
+		ContentType: "application/json",
+		Body:        dat,
+	})
 }
+
+//
+// Subscribing
+//
 
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
@@ -38,39 +37,52 @@ func SubscribeJSON[T any](
 	queueName,
 	key string,
 	queueType SimpleQueueType,
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
-		return fmt.Errorf("failed to declare and bind queue: %w", err)
+		return fmt.Errorf("could not declare and bind queue: %v", err)
 	}
 
 	msgs, err := ch.Consume(
-		queue.Name,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
+		queue.Name, // queue
+		"",         // consumer
+		false,      // auto-ack
+		false,      // exclusive
+		false,      // no-local
+		false,      // no-wait
+		nil,        // args
 	)
 	if err != nil {
-		return fmt.Errorf("failed to consume messages: %w", err)
+		return fmt.Errorf("could not consume messages: %v", err)
+	}
+
+	unmarshaller := func(data []byte) (T, error) {
+		var target T
+		err := json.Unmarshal(data, &target)
+		return target, err
 	}
 
 	go func() {
+		defer ch.Close()
 		for msg := range msgs {
-			var payload T
-			if err := json.Unmarshal(msg.Body, &payload); err != nil {
-				log.Printf("error decoding message: %v", err)
-				msg.Nack(false, false)
+			target, err := unmarshaller(msg.Body)
+			if err != nil {
+				fmt.Printf("could not unmarshal message: %v\n", err)
 				continue
 			}
-
-			handler(payload)
-			msg.Ack(false)
+			switch handler(target) {
+			case Ack:
+				msg.Ack(false)
+				fmt.Println("Ack")
+			case NackDiscard:
+				msg.Nack(false, false)
+				fmt.Println("NackDiscard")
+			case NackRequeue:
+				msg.Nack(false, true)
+				fmt.Println("NackRequeue")
+			}
 		}
 	}()
-
 	return nil
 }
