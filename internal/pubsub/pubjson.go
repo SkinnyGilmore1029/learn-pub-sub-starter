@@ -65,6 +65,7 @@ func SubscribeJSON[T any](
 
 	go func() {
 		defer ch.Close()
+		defer fmt.Print("> ")
 		for msg := range msgs {
 			target, err := unmarshaller(msg.Body)
 			if err != nil {

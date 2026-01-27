@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -30,51 +31,55 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not get username: %v", err)
 	}
+	gs := gamelogic.NewGameState(username)
 
-	newstate := gamelogic.NewGameState(username)
-
-	// Subscribe to pause/resume messages
-	err = pubsub.SubscribeJSON(
-		conn,
-		routing.ExchangePerilDirect, // exchange
-		routing.PauseKey+"."+newstate.GetUsername(), // queue name (unique for each client)
-		routing.PauseKey,            // routing key (pause)
-		pubsub.SimpleQueueTransient, // queue type
-		handlerPause(newstate),      // handler function
-	)
-	if err != nil {
-		log.Fatalf("could not subscribe to pause messages: %v", err)
-	}
-
-	// Subscribe to move messages
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilTopic,
-		routing.ArmyMovesPrefix+"."+newstate.GetUsername(),
-		routing.ArmyMovesPrefix+"."+"*",
+		routing.ArmyMovesPrefix+"."+gs.GetUsername(),
+		routing.ArmyMovesPrefix+".*",
 		pubsub.SimpleQueueTransient,
-		handlerMove(newstate),
+		handlerMove(gs, publishCh),
 	)
 	if err != nil {
 		log.Fatalf("could not subscribe to army moves: %v", err)
 	}
+	err = pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.WarRecognitionsPrefix,
+		routing.WarRecognitionsPrefix+".*",
+		pubsub.SimpleQueueDurable,
+		handlerWar(gs, publishCh),
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to war declarations: %v", err)
+	}
+	err = pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilDirect,
+		routing.PauseKey+"."+gs.GetUsername(),
+		routing.PauseKey,
+		pubsub.SimpleQueueTransient,
+		handlerPause(gs),
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to pause: %v", err)
+	}
 
 	for {
-		input := gamelogic.GetInput()
-		if len(input) == 0 {
+		words := gamelogic.GetInput()
+		if len(words) == 0 {
 			continue
 		}
-		switch input[0] {
-		case "spawn":
-			if err := newstate.CommandSpawn(input); err != nil {
-				fmt.Println("Error:", err)
-			}
+		switch words[0] {
 		case "move":
-			mv, err := newstate.CommandMove(input)
+			mv, err := gs.CommandMove(words)
 			if err != nil {
-				fmt.Println("Error:", err)
+				fmt.Println(err)
 				continue
 			}
+
 			err = pubsub.PublishJSON(
 				publishCh,
 				routing.ExchangePerilTopic,
@@ -86,43 +91,37 @@ func main() {
 				continue
 			}
 			fmt.Printf("Moved %v units to %s\n", len(mv.Units), mv.ToLocation)
+		case "spawn":
+			err = gs.CommandSpawn(words)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 		case "status":
-			newstate.CommandStatus()
+			gs.CommandStatus()
 		case "help":
 			gamelogic.PrintClientHelp()
 		case "spam":
+			// TODO: publish n malicious logs
 			fmt.Println("Spamming not allowed yet!")
 		case "quit":
-			fmt.Println("🛑 Shutting down client...")
+			gamelogic.PrintQuit()
 			return
 		default:
-			fmt.Println("Unknown Command")
-			continue
+			fmt.Println("unknown command")
 		}
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.Acktype {
-	return func(move gamelogic.ArmyMove) pubsub.Acktype {
-		defer fmt.Print("> ")
-		moveOutcome := gs.HandleMove(move)
-		switch moveOutcome {
-		case gamelogic.MoveOutcomeSamePlayer:
-			return pubsub.NackDiscard
-		case gamelogic.MoveOutComeSafe:
-			return pubsub.Ack
-		case gamelogic.MoveOutcomeMakeWar:
-			return pubsub.Ack
-		}
-		fmt.Println("error: unknown move outcome")
-		return pubsub.NackDiscard
-	}
-}
-
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Acktype {
-	return func(ps routing.PlayingState) pubsub.Acktype {
-		defer fmt.Print("> ")
-		gs.HandlePause(ps)
-		return pubsub.Ack
-	}
+func publishGameLog(publishCh *amqp.Channel, username, msg string) error {
+	return pubsub.PublishGob(
+		publishCh,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug+"."+username,
+		routing.GameLog{
+			Username:    username,
+			CurrentTime: time.Now(),
+			Message:     msg,
+		},
+	)
 }
