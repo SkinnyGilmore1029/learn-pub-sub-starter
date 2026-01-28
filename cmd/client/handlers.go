@@ -98,6 +98,7 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 	}
 }
 
+/*
 func handlerWarMessages(gs *gamelogic.GameState, publishCh *amqp.Channel) func(dw gamelogic.RecognitionOfWar) pubsub.Acktype {
 	return func(dw gamelogic.RecognitionOfWar) pubsub.Acktype {
 		defer fmt.Print("> ")
@@ -146,3 +147,4 @@ func handlerWarMessages(gs *gamelogic.GameState, publishCh *amqp.Channel) func(d
 		return pubsub.NackDiscard
 	}
 }
+*/

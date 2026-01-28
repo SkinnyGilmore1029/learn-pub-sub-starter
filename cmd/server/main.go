@@ -25,6 +25,7 @@ func main() {
 		log.Fatalf("could not create channel: %v", err)
 	}
 
+	/* This part is the part that needs to change to use SubscribeGob
 	_, queue, err := pubsub.DeclareAndBind(
 		conn,
 		routing.ExchangePerilTopic,
@@ -36,6 +37,31 @@ func main() {
 		log.Fatalf("could not subscribe to pause: %v", err)
 	}
 	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
+	*/
+
+	err = pubsub.SubscribeGob(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*", // wildcard to capture logs from all users
+		pubsub.SimpleQueueDurable,
+		func(gl routing.GameLog) pubsub.Acktype {
+			// defer printing the prompt (matches assignment requirement)
+			defer fmt.Print("> ")
+
+			// write the log to disk
+			if err := gamelogic.WriteLog(gl); err != nil {
+				fmt.Printf("could not write log: %v\n", err)
+				return pubsub.NackRequeue
+			}
+
+			return pubsub.Ack
+		},
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to game_logs: %v", err)
+	}
+	fmt.Println("Subscribed to game_logs queue using Gob!")
 
 	gamelogic.PrintServerHelp()
 
